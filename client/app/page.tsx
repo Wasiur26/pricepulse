@@ -1,4 +1,9 @@
-export default function Home() {
+import { auth0 } from "@/lib/auth0";
+
+export default async function Home() {
+  const session = await auth0.getSession();
+  const user = session?.user;
+
   return (
     <div className="min-h-screen flex flex-col font-sans text-gray-900 bg-gray-50">
       {/* Top Navigation Bar */}
@@ -21,18 +26,37 @@ export default function Home() {
           </a>
         </nav>
         <div className="flex items-center space-x-3">
-          <a
-            href="#"
-            className="hidden sm:block px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-          >
-            Sign In
-          </a>
-          <a
-            href="#"
-            className="px-5 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-indigo-600 to-purple-600 rounded-lg shadow-md shadow-indigo-200 hover:shadow-lg hover:-translate-y-0.5 transition-all"
-          >
-            Get Started Free
-          </a>
+          {user ? (
+            <>
+              <a
+                href="/dashboard"
+                className="hidden sm:block px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                Dashboard
+              </a>
+              <a
+                href="/auth/logout"
+                className="px-5 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-indigo-600 to-purple-600 rounded-lg shadow-md shadow-indigo-200 hover:shadow-lg hover:-translate-y-0.5 transition-all"
+              >
+                Sign Out
+              </a>
+            </>
+          ) : (
+            <>
+              <a
+                href="/login"
+                className="hidden sm:block px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                Sign In
+              </a>
+              <a
+                href="/signup"
+                className="px-5 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-indigo-600 to-purple-600 rounded-lg shadow-md shadow-indigo-200 hover:shadow-lg hover:-translate-y-0.5 transition-all"
+              >
+                Get Started Free
+              </a>
+            </>
+          )}
         </div>
       </header>
 
@@ -60,13 +84,13 @@ export default function Home() {
             </p>
             <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
               <a
-                href="#"
+                href={user ? "/dashboard" : "/signup"}
                 className="w-full sm:w-auto px-8 py-4 text-base font-semibold text-white bg-gradient-to-r from-indigo-600 to-purple-600 rounded-xl shadow-lg shadow-indigo-300 hover:shadow-xl hover:-translate-y-0.5 transition-all"
               >
-                Start Tracking Free
+                {user ? "Go to Dashboard" : "Start Tracking Free"}
               </a>
               <a
-                href="#"
+                href="#how-it-works"
                 className="w-full sm:w-auto px-8 py-4 text-base font-semibold text-gray-900 bg-white border-2 border-gray-300 rounded-xl hover:border-indigo-500 hover:text-indigo-600 transition-all"
               >
                 See How It Works
@@ -178,7 +202,7 @@ export default function Home() {
         </section>
 
         {/* How It Works Section */}
-        <section className="py-20 bg-white border-t border-gray-200">
+        <section id="how-it-works" className="py-20 bg-white border-t border-gray-200">
           <div className="max-w-5xl mx-auto px-6">
             <div className="text-center mb-14">
               <p className="text-sm font-semibold text-indigo-600 uppercase tracking-wider mb-2">
@@ -232,10 +256,10 @@ export default function Home() {
               less than a minute to set up.
             </p>
             <a
-              href="#"
+              href={user ? "/dashboard" : "/signup"}
               className="mt-8 inline-block px-10 py-4 text-base font-semibold text-indigo-700 bg-white rounded-xl shadow-xl hover:shadow-2xl hover:-translate-y-0.5 transition-all"
             >
-              Get Started Free
+              {user ? "Open Your Dashboard" : "Get Started Free"}
             </a>
           </div>
         </section>

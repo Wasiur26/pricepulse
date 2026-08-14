@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@auth0/nextjs-auth0": "^4.26.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "next": "16.3.1",
