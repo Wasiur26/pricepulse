@@ -1,64 +1,179 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 type TrackedItem = {
   id: string;
   name: string;
   url: string;
-  targetPrice: string;
-  createdAt: number;
+  targetPrice: number | null;
+  currency: string;
+  active: boolean;
+  lastPrice: number | null;
+  lastStatus: "pending" | "success" | "error";
+  lastCheckedAt: string | null;
+  nextCheckAt: string;
+  createdAt: string;
 };
 
-export default function TrackedItemsManager({ userId }: { userId: string }) {
+type UserContext = {
+  sub: string;
+  name?: string;
+  email?: string;
+  picture?: string;
+};
+
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
+
+export default function TrackedItemsManager({ user }: { user: UserContext }) {
   const [items, setItems] = useState<TrackedItem[]>([]);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [targetPrice, setTargetPrice] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      try {
-        const stored = localStorage.getItem(`tracked-items-${userId}`);
-        if (!cancelled && stored) setItems(JSON.parse(stored));
-      } catch {
-        if (!cancelled) setItems([]);
-      }
-    }, 0);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [userId]);
-
-  useEffect(() => {
+  const loadItems = useCallback(async () => {
     try {
-      localStorage.setItem(`tracked-items-${userId}`, JSON.stringify(items));
-    } catch {
-      // storage unavailable
+      const response = await fetch(`${API_BASE_URL}/api/tracked-items`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-sub": user.sub,
+          ...(user.name ? { "x-user-name": user.name } : {}),
+          ...(user.email ? { "x-user-email": user.email } : {}),
+          ...(user.picture ? { "x-user-picture": user.picture } : {}),
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to load items (${response.status})`);
+      }
+
+      const data = (await response.json()) as { items: TrackedItem[] };
+      setItems(data.items || []);
+    } catch (fetchError) {
+      setError(
+        fetchError instanceof Error
+          ? fetchError.message
+          : "Failed to load tracked items.",
+      );
+      setItems([]);
+    } finally {
+      setIsLoading(false);
     }
-  }, [items, userId]);
+  }, [user.email, user.name, user.picture, user.sub]);
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!url.trim()) return;
+  useEffect(() => {
+    let isMounted = true;
 
-    const newItem: TrackedItem = {
-      id: crypto.randomUUID(),
-      name: name.trim() || url.trim(),
-      url: url.trim(),
-      targetPrice: targetPrice.trim(),
-      createdAt: Date.now(),
+    const run = async () => {
+      await loadItems();
+      if (!isMounted) return;
     };
-    setItems((prev) => [newItem, ...prev]);
-    setName("");
-    setUrl("");
-    setTargetPrice("");
+
+    run();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [loadItems]);
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!url.trim() || isSaving) return;
+
+    setIsSaving(true);
+    setError(null);
+
+    try {
+      const parsedTargetPrice = targetPrice.trim()
+        ? Number.parseFloat(targetPrice.trim())
+        : null;
+
+      if (
+        parsedTargetPrice != null &&
+        (!Number.isFinite(parsedTargetPrice) || parsedTargetPrice < 0)
+      ) {
+        throw new Error("Target price must be a non-negative number.");
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/tracked-items`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-sub": user.sub,
+          ...(user.name ? { "x-user-name": user.name } : {}),
+          ...(user.email ? { "x-user-email": user.email } : {}),
+          ...(user.picture ? { "x-user-picture": user.picture } : {}),
+        },
+        body: JSON.stringify({
+          name: name.trim(),
+          url: url.trim(),
+          targetPrice: parsedTargetPrice,
+          currency: "USD",
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as {
+          message?: string;
+        } | null;
+        throw new Error(
+          payload?.message || `Failed to create item (${response.status})`,
+        );
+      }
+
+      const data = (await response.json()) as { item: TrackedItem };
+      setItems((prev) => [data.item, ...prev]);
+      setName("");
+      setUrl("");
+      setTargetPrice("");
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : "Failed to create tracked item.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
   }
 
-  function removeItem(id: string) {
-    setItems((prev) => prev.filter((item) => item.id !== id));
+  async function removeItem(id: string) {
+    setError(null);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/tracked-items/${id}`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-sub": user.sub,
+          ...(user.name ? { "x-user-name": user.name } : {}),
+          ...(user.email ? { "x-user-email": user.email } : {}),
+          ...(user.picture ? { "x-user-picture": user.picture } : {}),
+        },
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as {
+          message?: string;
+        } | null;
+        throw new Error(
+          payload?.message || `Failed to delete item (${response.status})`,
+        );
+      }
+
+      setItems((prev) => prev.filter((item) => item.id !== id));
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : "Failed to delete tracked item.",
+      );
+    }
   }
 
   return (
@@ -126,13 +241,20 @@ export default function TrackedItemsManager({ userId }: { userId: string }) {
           <div className="flex justify-end pt-2">
             <button
               type="submit"
+              disabled={isSaving}
               className="px-6 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-indigo-600 to-purple-600 rounded-lg shadow-md shadow-indigo-200 hover:shadow-lg hover:-translate-y-0.5 transition-all"
             >
-              Start Tracking
+              {isSaving ? "Saving..." : "Start Tracking"}
             </button>
           </div>
         </form>
       </div>
+
+      {error ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      ) : null}
 
       <div>
         <div className="flex items-center justify-between mb-4">
@@ -144,7 +266,11 @@ export default function TrackedItemsManager({ userId }: { userId: string }) {
           </span>
         </div>
 
-        {items.length === 0 ? (
+        {isLoading ? (
+          <div className="bg-white border border-gray-200 rounded-2xl p-8 text-sm text-gray-600">
+            Loading tracked items...
+          </div>
+        ) : items.length === 0 ? (
           <div className="bg-white border border-dashed border-gray-300 rounded-2xl p-12 text-center">
             <div className="w-12 h-12 mx-auto mb-4 rounded-xl bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center">
               <svg
@@ -197,7 +323,7 @@ export default function TrackedItemsManager({ userId }: { userId: string }) {
                   </p>
                   {item.targetPrice ? (
                     <p className="text-sm font-bold text-gray-900">
-                      ${item.targetPrice}
+                      ${item.targetPrice.toFixed(2)}
                     </p>
                   ) : (
                     <p className="text-sm font-semibold text-gray-400">

@@ -6,10 +6,15 @@
   "main": "index.js",
   "scripts": {
     "dev": "node index.js",
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "node scheduler/testScheduler.js",
+    "scheduler:run-once": "node scheduler/runOnce.js"
   },
   "dependencies": {
+    "cors": "^2.8.6",
     "dotenv": "^17.4.2",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "mongoose": "^9.9.2",
+    "node-cron": "^4.6.0"
   }
 }

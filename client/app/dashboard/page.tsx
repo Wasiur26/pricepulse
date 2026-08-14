@@ -7,7 +7,10 @@ const DashboardPage = auth0.withPageAuthRequired(
   async function DashboardPage() {
     const session = await auth0.getSession();
     const user = session?.user;
-    const userId = user?.sub ?? "anonymous";
+
+    if (!user?.sub) {
+      return null;
+    }
 
     return (
       <div className="min-h-screen flex flex-col font-sans text-gray-900 bg-gray-50">
@@ -96,14 +99,21 @@ const DashboardPage = auth0.withPageAuthRequired(
                   Manage the products you&apos;re tracking below.
                 </p>
               </div>
-              <TrackedItemsManager userId={userId} />
+              <TrackedItemsManager
+                user={{
+                  sub: user.sub,
+                  name: user.name,
+                  email: user.email,
+                  picture: user.picture,
+                }}
+              />
             </div>
           </main>
         </div>
       </div>
     );
   },
-  { returnTo: "/dashboard" }
+  { returnTo: "/dashboard" },
 );
 
 export default DashboardPage;
