@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const TrackedItem = require("../models/TrackedItem");
 const PriceCheck = require("../models/PriceCheck");
 const Alert = require("../models/Alert");
+const { fetchProductMetadata } = require("../scheduler/productScraper");
 
 const router = express.Router();
 
@@ -24,6 +25,8 @@ function toTrackedItemDto(item) {
     userId: item.user,
     name: item.name,
     url: item.url,
+    image: item.image,
+    platform: item.platform,
     targetPrice: item.targetPrice,
     currency: item.currency,
     active: item.active,
@@ -59,6 +62,9 @@ router.post("/", async (req, res) => {
     const url = String(req.body?.url || "").trim();
     const targetPrice = sanitizeTargetPrice(req.body?.targetPrice);
     const currency = sanitizeCurrency(req.body?.currency);
+    const image = req.body?.image ? String(req.body.image).trim() : null;
+    const platform = req.body?.platform ? String(req.body.platform).trim().toLowerCase().slice(0, 64) : null;
+    const initialPrice = sanitizeTargetPrice(req.body?.initialPrice);
 
     if (!url) {
       return res.status(400).json({
@@ -71,11 +77,14 @@ router.post("/", async (req, res) => {
       user: req.user._id,
       name: name || url,
       url,
+      image,
+      platform,
       targetPrice,
       currency,
       active: true,
       nextCheckAt: new Date(),
-      lastStatus: "pending",
+      lastStatus: initialPrice != null ? "success" : "pending",
+      ...(initialPrice != null ? { lastPrice: initialPrice } : {}),
     });
 
     return res.status(201).json({ item: toTrackedItemDto(item) });
@@ -83,6 +92,43 @@ router.post("/", async (req, res) => {
     return res.status(500).json({
       error: "ServerError",
       message: "Failed to create tracked item.",
+    });
+  }
+});
+
+/**
+ * POST /extract
+ * Clean a pasted product link, identify the platform, and return the initial
+ * product metadata (name, image, current price) before saving to the database.
+ */
+router.post("/extract", async (req, res) => {
+  try {
+    const rawUrl = String(req.body?.url || "").trim();
+    if (!rawUrl) {
+      return res.status(400).json({
+        error: "ValidationError",
+        message: "url is required.",
+      });
+    }
+
+    const metadata = await fetchProductMetadata(rawUrl);
+    return res.json({ metadata });
+  } catch (error) {
+    if (error.code === "INVALID_URL") {
+      return res.status(400).json({
+        error: "ValidationError",
+        message: error.message,
+      });
+    }
+    if (error.code === "HTTP_ERROR") {
+      return res.status(502).json({
+        error: "FetchError",
+        message: error.message,
+      });
+    }
+    return res.status(500).json({
+      error: "ServerError",
+      message: error.message || "Failed to extract product metadata.",
     });
   }
 });

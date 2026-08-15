@@ -19,6 +19,16 @@ const trackedItemSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    image: {
+      type: String,
+      default: null,
+    },
+    platform: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      default: null,
+    },
     targetPrice: {
       type: Number,
       min: 0,

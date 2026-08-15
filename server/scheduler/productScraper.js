@@ -644,6 +644,451 @@ function extractPriceFromHtml(html, url) {
 }
 
 /**
+ * ============================================================================
+ * METADATA EXTRACTION (Smart URL Parser)
+ * Cleans the URL, identifies the platform, and extracts the product name,
+ * image, and current price from a product page.
+ * ============================================================================
+ */
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const PLATFORM_RULES = [
+  ["amazon", /(^|\.)amazon\.(com|com\.au|com\.br|com\.mx|com\.tr|co\.jp|co\.uk|ca|cn|de|es|fr|in|it|mx|nl|pl|sa|se|sg|ae|eg)$/],
+  ["ebay", /(^|\.)ebay\.(com|co\.uk|co\.jp|co\.kr|co\.nz|com\.au|com\.br|com\.hk|com\.my|com\.sg|ca|ch|de|es|fr|ie|it|nl|ph|pl|be|at)$/],
+  ["walmart", /(^|\.)walmart\.(com|ca|com\.mx)$/],
+  ["bestbuy", /(^|\.)bestbuy\.(com|ca)$/],
+  ["target", /(^|\.)target\.com$/],
+  ["etsy", /(^|\.)etsy\.com$/],
+  ["newegg", /(^|\.)newegg\.(com|ca)$/],
+  ["aliexpress", /(^|\.)aliexpress\.(com|us|ru|de|fr|it|es|pt|pl|nl|id|co|mx|tr|ar|br|il|jp|kr|th|vn|sa|ae)$/],
+  ["alibaba", /(^|\.)alibaba\.(com|us|co|ae|pl|ru)$/],
+  ["shopify", /myshopify\.com$/],
+  ["homedepot", /(^|\.)homedepot\.com$/],
+  ["lowes", /(^|\.)lowes\.com$/],
+  ["costco", /(^|\.)costco\.(com|ca|co\.uk)$/],
+  ["ikea", /(^|\.)ikea\.(com|ca|co\.uk|co\.jp|de|fr|es|it|nl|se|dk|no|fi|pl|at|be|ch|cz|hk|hu|ie|kr|my|pt|ro|sg|sk|th|tw|us)$/],
+  ["nike", /(^|\.)nike\.(com|ca|co\.uk|de|fr|es|it|nl|jp|kr|au)$/],
+  ["adidas", /(^|\.)adidas\.(com|co\.uk|de|fr|es|it|nl|ca|au|jp|kr|mx|br|sg)$/],
+  ["apple", /(^|\.)apple\.com$/],
+  ["harborfreight", /(^|\.)harborfreight\.com$/],
+  ["overstock", /(^|\.)overstock\.com$/],
+  ["wayfair", /(^|\.)wayfair\.(com|ca|co\.uk)$/],
+  ["zappos", /(^|\.)zappos\.com$/],
+];
+
+/**
+ * Identify the retail platform for a given URL (hostname-based).
+ */
+function detectPlatform(rawUrl) {
+  let hostname = "";
+  try {
+    hostname = new URL(rawUrl).hostname.toLowerCase();
+  } catch {
+    try {
+      hostname = new URL(`https://${rawUrl}`).hostname.toLowerCase();
+    } catch {
+      return null;
+    }
+  }
+  for (const [name, pattern] of PLATFORM_RULES) {
+    if (pattern.test(hostname)) return name;
+  }
+  return "other";
+}
+
+const GENERIC_TRACKING_PARAMS = new Set([
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_term",
+  "utm_content",
+  "utm_id",
+  "utm_source_platform",
+  "utm_creative_format",
+  "utm_im",
+  "utm_au",
+  "fbclid",
+  "gclid",
+  "gclsrc",
+  "dclid",
+  "msclkid",
+  "srsltid",
+  "gbraid",
+  "wbraid",
+  "yclid",
+  "twclid",
+  "igshid",
+  "sprefix",
+  "mc_cid",
+  "mc_eid",
+  "mkt_tok",
+  "pk_campaign",
+  "pk_kwd",
+  "pk_medium",
+  "pk_source",
+  "piwik_campaign",
+  "wt_mc_id",
+  "wt_mc",
+  "icid",
+  "vero_id",
+]);
+
+const PLATFORM_TRACKING_PARAMS = {
+  amazon: new Set([
+    "ref",
+    "ref_",
+    "ref_src",
+    "ref_url",
+    "psc",
+    "th",
+    "qid",
+    "sr",
+    "ie",
+    "pf_rd_p",
+    "pf_rd_r",
+    "pf_rd_s",
+    "pf_rd_t",
+    "pf_rd_i",
+    "linkCode",
+    "tag",
+    "creative",
+    "adgrpid",
+    "keywords",
+  ]),
+  ebay: new Set(["_trkparms", "_trksid", "hash", "nrtc", "epid", "nid", "afepn", "campid", "mkrid", "customid"]),
+  walmart: new Set(["wmlspartner", "ath", "irgwb", "sourceid", "veh", "affiliatesadid", "adid", "wlcs", "adsRedirect", "irclickid", "irgwc", "from"]),
+  bestbuy: new Set(["skuId", "intl", "loc"]),
+};
+
+/**
+ * Remove tracking / referral query parameters and normalize a product URL.
+ * Returns null when the input cannot be parsed as a URL.
+ */
+function cleanUrl(rawUrl) {
+  if (typeof rawUrl !== "string" || !rawUrl.trim()) return null;
+
+  let url;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    try {
+      url = new URL(/^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`);
+    } catch {
+      return null;
+    }
+  }
+
+  if (!/^https?:$/.test(url.protocol)) return null;
+
+  const platform = detectPlatform(url.hostname);
+  const platformParams = PLATFORM_TRACKING_PARAMS[platform] || new Set();
+
+  for (const key of Array.from(url.searchParams.keys())) {
+    const lowerKey = key.toLowerCase();
+    if (GENERIC_TRACKING_PARAMS.has(lowerKey) || platformParams.has(lowerKey)) {
+      url.searchParams.delete(key);
+    }
+  }
+
+  url.hash = "";
+  url.hostname = url.hostname.toLowerCase();
+
+  return url.toString();
+}
+
+function resolveUrl(rawUrl, baseUrl) {
+  if (!rawUrl || typeof rawUrl !== "string") return null;
+  try {
+    return new URL(rawUrl, baseUrl).toString();
+  } catch {
+    return null;
+  }
+}
+
+function isValidProductImage(rawUrl) {
+  if (!rawUrl || rawUrl.startsWith("data:")) return false;
+  try {
+    const url = new URL(rawUrl);
+    if (!/^https?:$/.test(url.protocol)) return false;
+    const path = url.pathname.toLowerCase();
+    if (/spacer|pixel|placeholder|blank|loader|loading|transparent|1x1|\.gif$/.test(path)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getMetaContent(html, propertyOrName) {
+  const escaped = escapeRegExp(propertyOrName);
+  const patterns = [
+    new RegExp(`<meta\\b[^>]*property=["']${escaped}["'][^>]*content=["']([^"']+)["']`, "i"),
+    new RegExp(`<meta\\b[^>]*name=["']${escaped}["'][^>]*content=["']([^"']+)["']`, "i"),
+    new RegExp(`<meta\\b[^>]*content=["']([^"']+)["'][^>]*(?:property|name)=["']${escaped}["']`, "i"),
+  ];
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (match && match[1]) {
+      const value = decodeHtmlEntities(match[1]).trim();
+      if (value) return value;
+    }
+  }
+  return null;
+}
+
+function nodeTypeMatches(node, typeName) {
+  const type = node["@type"];
+  if (typeof type === "string") return type === typeName;
+  if (Array.isArray(type)) return type.includes(typeName);
+  return false;
+}
+
+function isValidProductName(value) {
+  if (typeof value !== "string") return false;
+  const name = value.trim();
+  return name.length >= 3 && name.length <= 300;
+}
+
+/**
+ * Recursively walk JSON-LD and return the first product-ish `name`.
+ * With preferProduct=true only nodes typed `Product` are considered.
+ */
+function findNameInJsonLdNode(node, opts, depth = 0) {
+  if (depth > 14) return null;
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const result = findNameInJsonLdNode(child, opts, depth + 1);
+      if (result) return result;
+    }
+    return null;
+  }
+  if (!node || typeof node !== "object") return null;
+
+  const isProduct = nodeTypeMatches(node, "Product");
+  if (opts.preferProduct ? isProduct && isValidProductName(node.name) : isValidProductName(node.name)) {
+    return node.name.trim();
+  }
+
+  for (const key of Object.keys(node)) {
+    if (key === "@context") continue;
+    const child = node[key];
+    if (child && typeof child === "object") {
+      const result = findNameInJsonLdNode(child, opts, depth + 1);
+      if (result) return result;
+    }
+  }
+  return null;
+}
+
+function extractNameFromJsonLd(html) {
+  if (!html) return null;
+  const jsonLdRegex = /<script\b[^>]*type=["']application\/ld\+json(?:;[^"']*)?["'][^>]*>([\s\S]*?)<\/script>/gi;
+  const nodes = [];
+  let match;
+  while ((match = jsonLdRegex.exec(html)) !== null) {
+    try {
+      nodes.push(JSON.parse(match[1].trim()));
+    } catch {
+      // ignore malformed JSON
+    }
+  }
+
+  for (const node of nodes) {
+    const result = findNameInJsonLdNode(node, { preferProduct: true });
+    if (result) return result;
+  }
+  for (const node of nodes) {
+    const result = findNameInJsonLdNode(node, { preferProduct: false });
+    if (result) return result;
+  }
+  return null;
+}
+
+function stripTitleSuffix(title, platform) {
+  const separators = [" - ", " | ", " – ", " — ", " · ", " :: "];
+  for (const sep of separators) {
+    const index = title.lastIndexOf(sep);
+    if (index <= 0) continue;
+    const candidate = title.slice(0, index).trim();
+    const suffix = title.slice(index + sep.length).trim();
+    if (candidate.length < 3 || suffix.length > 50) continue;
+    const looksLikeSiteSuffix =
+      /(^|\.)(com|co|org|net|io|shop|store|online|official|marketplace)$/i.test(suffix) ||
+      /^(amazon|ebay|walmart|best.?buy|target|etsy|aliexpress|alibaba|ikea|home depot|wayfair|newegg|nike|adidas|apple|official store)$/i.test(suffix) ||
+      (platform && platform !== "other" && new RegExp(escapeRegExp(platform), "i").test(suffix));
+    if (looksLikeSiteSuffix) return candidate;
+  }
+  return title;
+}
+
+/**
+ * Extract a human-friendly product name from the page content.
+ */
+function extractProductName(html, platform = null) {
+  if (!html) return null;
+
+  const jsonLdName = extractNameFromJsonLd(html);
+  if (jsonLdName) return jsonLdName;
+
+  const metaTitle = getMetaContent(html, "og:title") || getMetaContent(html, "twitter:title");
+  if (metaTitle && metaTitle.length >= 3 && metaTitle.length <= 300) return metaTitle;
+
+  const titleMatch = html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
+  if (titleMatch && titleMatch[1]) {
+    const title = decodeHtmlEntities(stripTags(titleMatch[1])).trim();
+    const cleaned = stripTitleSuffix(title, platform);
+    if (cleaned && cleaned.length >= 3 && cleaned.length <= 300) return cleaned;
+  }
+
+  const h1Match = html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i);
+  if (h1Match && h1Match[1]) {
+    const heading = decodeHtmlEntities(stripTags(h1Match[1])).trim();
+    if (heading.length >= 3 && heading.length <= 300) return heading;
+  }
+
+  return null;
+}
+
+function extractImageUrlFromValue(value) {
+  if (typeof value === "string") return value.trim() || null;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const url = extractImageUrlFromValue(item);
+      if (url) return url;
+    }
+    return null;
+  }
+  if (value && typeof value === "object") {
+    if (typeof value.url === "string" && value.url.trim()) return value.url.trim();
+    if (typeof value.contentUrl === "string" && value.contentUrl.trim()) return value.contentUrl.trim();
+  }
+  return null;
+}
+
+/**
+ * Recursively walk JSON-LD and return the first product `image`.
+ * With preferProduct=true only nodes typed `Product` are considered.
+ */
+function findImageInJsonLdNode(node, opts, depth = 0) {
+  if (depth > 14) return null;
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const result = findImageInJsonLdNode(child, opts, depth + 1);
+      if (result) return result;
+    }
+    return null;
+  }
+  if (!node || typeof node !== "object") return null;
+
+  const isProduct = nodeTypeMatches(node, "Product");
+  if (node.image != null && (opts.preferProduct ? isProduct : true)) {
+    const imageUrl = extractImageUrlFromValue(node.image);
+    if (imageUrl) return imageUrl;
+  }
+
+  for (const key of Object.keys(node)) {
+    if (key === "@context") continue;
+    const child = node[key];
+    if (child && typeof child === "object") {
+      const result = findImageInJsonLdNode(child, opts, depth + 1);
+      if (result) return result;
+    }
+  }
+  return null;
+}
+
+function extractImageFromJsonLd(html) {
+  if (!html) return null;
+  const jsonLdRegex = /<script\b[^>]*type=["']application\/ld\+json(?:;[^"']*)?["'][^>]*>([\s\S]*?)<\/script>/gi;
+  const nodes = [];
+  let match;
+  while ((match = jsonLdRegex.exec(html)) !== null) {
+    try {
+      nodes.push(JSON.parse(match[1].trim()));
+    } catch {
+      // ignore malformed JSON
+    }
+  }
+
+  for (const node of nodes) {
+    const result = findImageInJsonLdNode(node, { preferProduct: true });
+    if (result) return result;
+  }
+  for (const node of nodes) {
+    const result = findImageInJsonLdNode(node, { preferProduct: false });
+    if (result) return result;
+  }
+  return null;
+}
+
+/**
+ * Extract a product image URL from the page, resolving relative paths.
+ */
+function extractProductImage(html, baseUrl) {
+  if (!html) return null;
+  const candidates = [];
+
+  const jsonLdImage = extractImageFromJsonLd(html);
+  if (jsonLdImage) candidates.push(jsonLdImage);
+
+  for (const name of ["og:image", "og:image:url", "twitter:image", "twitter:image:src"]) {
+    const value = getMetaContent(html, name);
+    if (value) candidates.push(value);
+  }
+
+  const itempropImage = html.match(/<meta\b[^>]*itemprop=["']image["'][^>]*content=["']([^"']+)["']/i);
+  if (itempropImage && itempropImage[1]) candidates.push(itempropImage[1]);
+
+  const relImage = html.match(/<link\b[^>]*rel=["']image_src["'][^>]*href=["']([^"']+)["']/i);
+  if (relImage && relImage[1]) candidates.push(relImage[1]);
+
+  const imgRe = /<img\b[^>]*>/gi;
+  let match;
+  while ((match = imgRe.exec(html)) !== null && candidates.length < 8) {
+    const tag = match[0];
+    const attrs = tag.slice(4);
+    if (!/itemprop=["']image["']/i.test(attrs)) {
+      const contextStart = Math.max(0, match.index - 400);
+      const context = html.slice(contextStart, match.index + tag.length);
+      if (!/class=["'][^"']*(product|hero|main|primary|gallery|item-image)[^"']*["']/i.test(context)) continue;
+    }
+    const src =
+      getAttributeValue(tag, "src") ||
+      getAttributeValue(tag, "data-src") ||
+      getAttributeValue(tag, "data-lazy-src") ||
+      getAttributeValue(tag, "content");
+    if (src) candidates.push(src);
+  }
+
+  for (const raw of candidates) {
+    const resolved = resolveUrl(raw, baseUrl);
+    if (isValidProductImage(resolved)) return resolved;
+  }
+  return null;
+}
+
+/**
+ * Extract the full metadata set (platform, name, image, price) from raw HTML.
+ */
+function extractProductMetadata(html, url) {
+  const platform = detectPlatform(url);
+  const priceResult = extractPriceFromHtml(html, url);
+  const name = extractProductName(html, platform);
+  const image = extractProductImage(html, url);
+
+  return {
+    platform,
+    name,
+    image,
+    price: priceResult ? priceResult.price : null,
+    currency: priceResult ? priceResult.currency : null,
+    priceStrategy: priceResult ? priceResult.strategy : null,
+  };
+}
+
+/**
  * Fetch a page with browser-like headers and a single retry on transient failures
  */
 async function fetchPage(targetUrl, timeoutMs) {
@@ -690,6 +1135,79 @@ async function fetchPage(targetUrl, timeoutMs) {
   if (lastResponse) return lastResponse;
   if (lastError) throw lastError;
   return null;
+}
+
+function isPrivateHost(hostname) {
+  const host = hostname.toLowerCase();
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return true;
+
+  if (host.includes(":")) {
+    return host === "::1" || host === "::" || host.startsWith("::ffff:") || host === "[::1]" || host === "[::]";
+  }
+
+  const parts = host.split(".");
+  if (parts.length === 4 && parts.every((part) => /^\d{1,3}$/.test(part))) {
+    const [a, b] = parts.map(Number);
+    if (a === 10 || a === 127 || a === 0) return true;
+    if (a === 169 && b === 254) return true; // link-local
+    if (a === 192 && b === 168) return true; // private
+    if (a === 172 && b >= 16 && b <= 31) return true; // private
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+  }
+  return false;
+}
+
+function isAllowedProductUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    if (!/^https?:$/.test(url.protocol)) return false;
+    if (isPrivateHost(url.hostname)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Clean, fetch, and extract full product metadata (name, image, current price,
+ * platform) from a pasted product link.
+ */
+async function fetchProductMetadata(rawUrl) {
+  const cleanedUrl = cleanUrl(rawUrl);
+  if (!cleanedUrl || !isAllowedProductUrl(cleanedUrl)) {
+    const error = new Error("Invalid or unsupported product URL.");
+    error.code = "INVALID_URL";
+    throw error;
+  }
+
+  const timeoutMs = Number.parseInt(process.env.SCRAPER_TIMEOUT_MS || "15000", 10);
+  const response = await fetchPage(cleanedUrl, timeoutMs);
+
+  if (!response) {
+    const error = new Error("Failed to reach the product page.");
+    error.code = "FETCH_FAILED";
+    throw error;
+  }
+  if (!response.ok) {
+    const error = new Error(`Product page returned HTTP ${response.status}.`);
+    error.code = "HTTP_ERROR";
+    error.status = response.status;
+    throw error;
+  }
+
+  const html = await response.text();
+  const finalUrl = cleanUrl(response.url) || cleanedUrl;
+  const metadata = extractProductMetadata(html, finalUrl);
+
+  return {
+    url: finalUrl,
+    platform: metadata.platform,
+    name: metadata.name,
+    image: metadata.image,
+    price: metadata.price,
+    currency: metadata.currency,
+    priceStrategy: metadata.priceStrategy,
+  };
 }
 
 /**
@@ -770,6 +1288,8 @@ async function runPriceCheck(trackedItem) {
 
 module.exports = {
   runPriceCheck,
+  fetchProductMetadata,
+  extractProductMetadata,
   extractPriceFromHtml,
   extractPriceFromJsonLd,
   extractPriceFromMetaTags,
@@ -778,4 +1298,10 @@ module.exports = {
   extractPriceByDomain,
   extractPriceByRegex,
   parsePriceNumber,
+  cleanUrl,
+  detectPlatform,
+  extractProductName,
+  extractProductImage,
+  extractNameFromJsonLd,
+  extractImageFromJsonLd,
 };

@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "node index.js",
     "start": "node index.js",
-    "test": "node scheduler/testScheduler.js",
+    "test": "node scheduler/runTests.js",
     "scheduler:run-once": "node scheduler/runOnce.js",
     "scheduler:seed-demo": "node scheduler/seedDemo.js"
   },

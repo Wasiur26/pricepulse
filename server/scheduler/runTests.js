@@ -2,7 +2,12 @@ const assert = require("assert");
 const {
   extractPriceFromHtml,
   parsePriceNumber,
-} = require("./priceChecker");
+  cleanUrl,
+  detectPlatform,
+  extractProductName,
+  extractProductImage,
+  extractProductMetadata,
+} = require("./productScraper");
 const {
   CHECK_INTERVAL_MS,
   RETRY_INITIAL_DELAY_MS,
@@ -11,7 +16,7 @@ const {
 const { calculateRetryDelay } = require("./priceScheduler");
 
 console.log("=================================================");
-console.log("RUNNING HIGH-FREQUENCY SCHEDULER UNIT TESTS");
+console.log("RUNNING PRICEPULSE SCHEDULER & SCRAPER UNIT TESTS");
 console.log("=================================================");
 
 function testPriceParsing() {
@@ -222,6 +227,118 @@ function testIntervalAndBackoffCalculations() {
   console.log("✓ Interval & backoff timing tests passed.");
 }
 
+function testCleanUrl() {
+  console.log("\n[Test 11] Testing URL cleaning (tracking param stripping)...");
+
+  const amazon = cleanUrl("https://www.amazon.com/dp/B08N5WRWNW?psc=1&th=1&ref_=nav_ya_signin&tag=affiliate-20");
+  assert.strictEqual(amazon, "https://www.amazon.com/dp/B08N5WRWNW");
+  assert.ok(cleanUrl("https://www.amazon.com/dp/B08N5WRWNW").includes("/dp/B08N5WRWNW"));
+
+  const ebay = cleanUrl("https://www.ebay.com/itm/123456789012?hash=itemabc%3Ag&_trkparms=xyz");
+  assert.strictEqual(ebay, "https://www.ebay.com/itm/123456789012");
+
+  const utm = cleanUrl("https://shop.example.com/p/42?utm_source=newsletter&utm_campaign=launch&q=keep");
+  assert.strictEqual(utm, "https://shop.example.com/p/42?q=keep");
+
+  const noProtocol = cleanUrl("www.example.com/product");
+  assert.strictEqual(noProtocol, "https://www.example.com/product");
+
+  const hash = cleanUrl("https://www.example.com/product#section");
+  assert.strictEqual(hash, "https://www.example.com/product");
+
+  assert.strictEqual(cleanUrl("not a url at all"), null);
+  assert.strictEqual(cleanUrl("ftp://example.com/file"), null);
+
+  console.log("✓ URL cleaning test passed.");
+}
+
+function testDetectPlatform() {
+  console.log("\n[Test 12] Testing platform detection...");
+
+  assert.strictEqual(detectPlatform("https://www.amazon.com/dp/B08N5WRWNW"), "amazon");
+  assert.strictEqual(detectPlatform("https://www.ebay.co.uk/itm/123"), "ebay");
+  assert.strictEqual(detectPlatform("https://www.walmart.com/ip/123"), "walmart");
+  assert.strictEqual(detectPlatform("https://www.bestbuy.com/site/x/123.p"), "bestbuy");
+  assert.strictEqual(detectPlatform("https://www.ikea.com/us/en/p/billy-bookcase-white-90522043/"), "ikea");
+  assert.strictEqual(detectPlatform("https://my-store.myshopify.com/products/thing"), "shopify");
+  assert.strictEqual(detectPlatform("https://random-store.com/product"), "other");
+  assert.strictEqual(detectPlatform("not a url"), null);
+
+  console.log("✓ Platform detection test passed.");
+}
+
+function testMetadataExtraction() {
+  console.log("\n[Test 13] Testing metadata extraction (name, image, price, platform)...");
+
+  const sampleHtml = `
+    <html>
+      <head>
+        <title>BILLY, bookcase, white, 40x28x202 cm - IKEA</title>
+        <meta property="og:title" content="BILLY, bookcase, white, 40x28x202 cm" />
+        <meta property="og:image" content="https://www.ikea.com/us/en/images/products/billy__1111111.jpg" />
+        <meta property="og:price:amount" content="89.00" />
+        <meta property="og:price:currency" content="USD" />
+        <script type="application/ld+json">
+          {
+            "@context": "https://schema.org",
+            "@type": "Product",
+            "name": "BILLY, bookcase, white, 40x28x202 cm",
+            "image": "https://www.ikea.com/us/en/images/products/billy-1.jpg",
+            "offers": { "@type": "Offer", "price": "89.00", "priceCurrency": "USD" }
+          }
+        </script>
+      </head>
+      <body><h1>BILLY, bookcase, white, 40x28x202 cm</h1></body>
+    </html>
+  `;
+  const metadata = extractProductMetadata(sampleHtml, "https://www.ikea.com/us/en/p/billy-bookcase-white-90522043/");
+  assert.strictEqual(metadata.platform, "ikea");
+  assert.strictEqual(metadata.name, "BILLY, bookcase, white, 40x28x202 cm");
+  assert.strictEqual(metadata.image, "https://www.ikea.com/us/en/images/products/billy-1.jpg");
+  assert.strictEqual(metadata.price, 89);
+  assert.strictEqual(metadata.currency, "USD");
+
+  console.log("✓ Metadata extraction test passed.");
+}
+
+function testNameAndImageExtraction() {
+  console.log("\n[Test 14] Testing name/image fallback strategies...");
+
+  const ogTitle = extractProductName(
+    `<meta property="og:title" content="Echo Dot (5th Gen) Smart Speaker" /><title>Echo Dot (5th Gen) Smart Speaker - Amazon.com</title>`,
+    "amazon",
+  );
+  assert.strictEqual(ogTitle, "Echo Dot (5th Gen) Smart Speaker");
+
+  const titleOnly = extractProductName(
+    `<title>Wireless Mouse - Official Store</title>`,
+    "other",
+  );
+  assert.strictEqual(titleOnly, "Wireless Mouse");
+
+  const jsonLdOnly = extractProductName(
+    `<script type="application/ld+json">{"@type":"Product","name":"Steel Bottle 1L"}</script>`,
+  );
+  assert.strictEqual(jsonLdOnly, "Steel Bottle 1L");
+
+  const relativeImage = extractProductImage(
+    `<meta property="og:image" content="/images/product.jpg" />`,
+    "https://store.example.com/products/123",
+  );
+  assert.strictEqual(relativeImage, "https://store.example.com/images/product.jpg");
+
+  const imgContainer = extractProductImage(
+    `<div class="product-gallery"><img src="https://cdn.example.com/img/sku123.png" /></div>`,
+    "https://store.example.com/p/1",
+  );
+  assert.strictEqual(imgContainer, "https://cdn.example.com/img/sku123.png");
+
+  assert.strictEqual(extractProductImage(`<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" />`, "https://x.com/p"), null);
+  assert.strictEqual(extractProductName(`<title>XY</title>`), null);
+
+  console.log("✓ Name/image extraction test passed.");
+}
+
 function runAllTests() {
   try {
     testPriceParsing();
@@ -234,8 +351,12 @@ function runAllTests() {
     testMicrodataExtraction();
     testElementPatternExtraction();
     testRegexFallbackRobustness();
+    testCleanUrl();
+    testDetectPlatform();
+    testMetadataExtraction();
+    testNameAndImageExtraction();
     console.log("\n=================================================");
-    console.log("ALL SCHEDULER & PRICE-CHECK TESTS PASSED (10/10)");
+    console.log("ALL SCHEDULER & PRICE-CHECK TESTS PASSED (14/14)");
     console.log("=================================================\n");
   } catch (error) {
     console.error("\n❌ TEST FAILED:", error);
