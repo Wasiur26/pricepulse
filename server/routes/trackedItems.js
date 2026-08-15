@@ -159,7 +159,7 @@ router.patch("/:id", async (req, res) => {
     const item = await TrackedItem.findOneAndUpdate(
       { _id: itemId, user: req.user._id },
       { $set: updates },
-      { new: true },
+      { returnDocument: "after" },
     );
 
     if (!item) {

@@ -28,7 +28,7 @@ async function requireUser(req, res, next) {
       },
       {
         upsert: true,
-        new: true,
+        returnDocument: "after",
         setDefaultsOnInsert: true,
       },
     );

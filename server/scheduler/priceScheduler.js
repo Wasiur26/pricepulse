@@ -108,7 +108,7 @@ async function claimDueTrackedItem() {
       },
     },
     {
-      new: true,
+      returnDocument: "after",
       sort: { nextCheckAt: 1 },
     },
   ).populate("user");

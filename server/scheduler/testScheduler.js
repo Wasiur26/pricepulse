@@ -101,9 +101,9 @@ function testDomainSpecificPatterns() {
 function testRegexFallback() {
   console.log("\n[Test 5] Testing heuristic regex fallback...");
   const fallbackHtml = `
-    <div class="custom-card">
-      <span class="label">Our Price:</span>
-      <span class="amount">$45.50</span>
+    <div class="banner">
+      <span>Sale price:</span>
+      <strong>$45.50</strong>
     </div>
   `;
   const result = extractPriceFromHtml(fallbackHtml, "https://unknown-shop.com/product");
@@ -111,6 +111,91 @@ function testRegexFallback() {
   assert.strictEqual(result.price, 45.5);
   assert.strictEqual(result.strategy, "regex-fallback");
   console.log("✓ Regex fallback test passed.");
+}
+
+function testNestedJsonLdExtraction() {
+  console.log("\n[Test 7] Testing recursive JSON-LD extraction (nested @graph + priceSpecification array)...");
+  const nestedJsonLd = `
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          { "@type": "Organization", "name": "Example Store" },
+          {
+            "@type": "Product",
+            "name": "BILLY Bookcase",
+            "offers": {
+              "@type": "Offer",
+              "priceSpecification": [
+                { "@type": "UnitPriceSpecification", "price": 89, "priceCurrency": "USD" },
+                { "@type": "UnitPriceSpecification", "price": 69, "priceCurrency": "USD" }
+              ]
+            }
+          }
+        ]
+      }
+    </script>
+  `;
+  const result = extractPriceFromHtml(nestedJsonLd, "https://example-store.com/billy");
+  assert(result !== null, "Nested JSON-LD should extract a price");
+  assert.strictEqual(result.price, 89, "Should pick the first (current) price in the priceSpecification array");
+  assert.strictEqual(result.currency, "USD");
+  assert.strictEqual(result.strategy, "json-ld");
+  console.log("✓ Recursive JSON-LD extraction test passed.");
+}
+
+function testMicrodataExtraction() {
+  console.log("\n[Test 8] Testing Schema.org microdata (itemprop=price) extraction...");
+  const microdataHtml = `
+    <div>
+      <h1>Wireless Mouse</h1>
+      <span itemprop="price">$28.99</span>
+      <span itemprop="priceCurrency">USD</span>
+    </div>
+  `;
+  const result = extractPriceFromHtml(microdataHtml, "https://example-shop.com/mouse");
+  assert(result !== null, "Microdata extraction should succeed");
+  assert.strictEqual(result.price, 28.99);
+  assert.strictEqual(result.strategy, "microdata");
+  console.log("✓ Microdata extraction test passed.");
+}
+
+function testElementPatternExtraction() {
+  console.log("\n[Test 9] Testing price-container class/id pattern extraction...");
+  const elementHtml = `
+    <div class="product-card">
+      <img src="mouse.jpg" alt="Mouse">
+      <span class="product-price">$1,299.99</span>
+      <button>Add to cart</button>
+    </div>
+  `;
+  const result = extractPriceFromHtml(elementHtml, "https://example-shop.com/tablet");
+  assert(result !== null, "Element pattern extraction should succeed");
+  assert.strictEqual(result.price, 1299.99);
+  assert.strictEqual(result.strategy, "element-pattern");
+  console.log("✓ Element pattern extraction test passed.");
+}
+
+function testRegexFallbackRobustness() {
+  console.log("\n[Test 10] Testing regex fallback robustness (whole dollars, currency codes, noise rejection)...");
+
+  const wholeDollar = extractPriceFromHtml(`<p>Our Price: $45</p>`, "https://x.com/a");
+  assert.strictEqual(wholeDollar.price, 45, "Whole-dollar price without cents should extract");
+
+  const bareDecimal = extractPriceFromHtml(`<p>Subtotal 89.00</p>`, "https://x.com/b");
+  assert.strictEqual(bareDecimal.price, 89, "Bare 2-decimal number in a price context should extract");
+
+  const currencyCode = extractPriceFromHtml(`<p>Price is 1499.50 GBP</p>`, "https://x.com/c");
+  assert.strictEqual(currencyCode.price, 1499.5, "Currency-code-suffixed price should extract");
+  assert.strictEqual(currencyCode.currency, "GBP", "Currency code should be detected");
+
+  const noise = extractPriceFromHtml(
+    `<p>Total visitors: 2026 and rating 4.8 out of 5. Model ABC-1234.</p>`,
+    "https://x.com/d",
+  );
+  assert.strictEqual(noise, null, "Pages with only years/ratings/quantities should not produce a price");
+
+  console.log("✓ Regex fallback robustness test passed.");
 }
 
 function testIntervalAndBackoffCalculations() {
@@ -145,8 +230,12 @@ function runAllTests() {
     testDomainSpecificPatterns();
     testRegexFallback();
     testIntervalAndBackoffCalculations();
+    testNestedJsonLdExtraction();
+    testMicrodataExtraction();
+    testElementPatternExtraction();
+    testRegexFallbackRobustness();
     console.log("\n=================================================");
-    console.log("ALL SCHEDULER & PRICE-CHECK TESTS PASSED (6/6)");
+    console.log("ALL SCHEDULER & PRICE-CHECK TESTS PASSED (10/10)");
     console.log("=================================================\n");
   } catch (error) {
     console.error("\n❌ TEST FAILED:", error);
