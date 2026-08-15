@@ -1,19 +1,32 @@
 "use client";
 
+import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
 
 type TrackedItem = {
   id: string;
   name: string;
   url: string;
+  image: string | null;
+  platform: string | null;
   targetPrice: number | null;
   currency: string;
   active: boolean;
   lastPrice: number | null;
-  lastStatus: "pending" | "success" | "error";
+  lastStatus: "pending" | "success" | "error" | "skipped";
   lastCheckedAt: string | null;
   nextCheckAt: string;
   createdAt: string;
+};
+
+type ExtractMetadata = {
+  url: string;
+  platform: string | null;
+  name: string | null;
+  image: string | null;
+  price: number | null;
+  currency: string | null;
+  priceStrategy: string | null;
 };
 
 type UserContext = {
@@ -26,6 +39,63 @@ type UserContext = {
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
 
+const PLATFORM_LABELS: Record<string, string> = {
+  amazon: "Amazon",
+  ebay: "eBay",
+  walmart: "Walmart",
+  bestbuy: "Best Buy",
+  target: "Target",
+  etsy: "Etsy",
+  newegg: "Newegg",
+  aliexpress: "AliExpress",
+  alibaba: "Alibaba",
+  shopify: "Shopify",
+  homedepot: "Home Depot",
+  lowes: "Lowe's",
+  costco: "Costco",
+  ikea: "IKEA",
+  nike: "Nike",
+  adidas: "Adidas",
+  apple: "Apple",
+  harborfreight: "Harbor Freight",
+  overstock: "Overstock",
+  wayfair: "Wayfair",
+  zappos: "Zappos",
+};
+
+function formatPrice(price: number | null, currency: string | null): string {
+  if (price == null) return "—";
+  const code = (currency || "USD").toUpperCase();
+  const symbols: Record<string, string> = {
+    USD: "$",
+    EUR: "€",
+    GBP: "£",
+    JPY: "¥",
+    INR: "₹",
+    CAD: "C$",
+    AUD: "A$",
+    KRW: "₩",
+  };
+  const symbol = symbols[code];
+  if (symbol) return `${symbol}${price.toFixed(2)}`;
+  return `${price.toFixed(2)} ${code}`;
+}
+
+function platformLabel(platform: string | null): string | null {
+  if (!platform) return null;
+  return PLATFORM_LABELS[platform] || platform;
+}
+
+function userHeaders(user: UserContext): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    "x-user-sub": user.sub,
+    ...(user.name ? { "x-user-name": user.name } : {}),
+    ...(user.email ? { "x-user-email": user.email } : {}),
+    ...(user.picture ? { "x-user-picture": user.picture } : {}),
+  };
+}
+
 export default function TrackedItemsManager({ user }: { user: UserContext }) {
   const [items, setItems] = useState<TrackedItem[]>([]);
   const [name, setName] = useState("");
@@ -35,17 +105,17 @@ export default function TrackedItemsManager({ user }: { user: UserContext }) {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [preview, setPreview] = useState<ExtractMetadata | null>(null);
+  const [extractState, setExtractState] = useState<
+    "idle" | "loading" | "success" | "error"
+  >("idle");
+  const [extractMessage, setExtractMessage] = useState<string | null>(null);
+
   const loadItems = useCallback(async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/tracked-items`, {
         method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          "x-user-sub": user.sub,
-          ...(user.name ? { "x-user-name": user.name } : {}),
-          ...(user.email ? { "x-user-email": user.email } : {}),
-          ...(user.picture ? { "x-user-picture": user.picture } : {}),
-        },
+        headers: userHeaders(user),
       });
 
       if (!response.ok) {
@@ -64,7 +134,7 @@ export default function TrackedItemsManager({ user }: { user: UserContext }) {
     } finally {
       setIsLoading(false);
     }
-  }, [user.email, user.name, user.picture, user.sub]);
+  }, [user]);
 
   useEffect(() => {
     let isMounted = true;
@@ -80,6 +150,64 @@ export default function TrackedItemsManager({ user }: { user: UserContext }) {
       isMounted = false;
     };
   }, [loadItems]);
+
+  useEffect(() => {
+    const candidate = url.trim();
+    const isValidUrl = candidate && /^https?:\/\//i.test(candidate);
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      if (!isValidUrl) {
+        setPreview(null);
+        setExtractState("idle");
+        setExtractMessage(null);
+        return;
+      }
+
+      setExtractState("loading");
+      setExtractMessage(null);
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/tracked-items/extract`, {
+          method: "POST",
+          headers: userHeaders(user),
+          body: JSON.stringify({ url: candidate }),
+        });
+
+        if (cancelled) return;
+
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as {
+            message?: string;
+          } | null;
+          throw new Error(
+            payload?.message || `Could not read product info (${response.status})`,
+          );
+        }
+
+        const data = (await response.json()) as { metadata: ExtractMetadata };
+        setPreview(data.metadata);
+        setExtractState("success");
+        const detectedName = data.metadata.name;
+        if (detectedName) {
+          setName((prev) => (prev.trim() ? prev : detectedName));
+        }
+      } catch (extractError) {
+        if (cancelled) return;
+        setPreview(null);
+        setExtractState("error");
+        setExtractMessage(
+          extractError instanceof Error
+            ? extractError.message
+            : "Could not auto-detect product info. You can still add it manually.",
+        );
+      }
+    }, 700);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [url, user]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -102,18 +230,15 @@ export default function TrackedItemsManager({ user }: { user: UserContext }) {
 
       const response = await fetch(`${API_BASE_URL}/api/tracked-items`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-user-sub": user.sub,
-          ...(user.name ? { "x-user-name": user.name } : {}),
-          ...(user.email ? { "x-user-email": user.email } : {}),
-          ...(user.picture ? { "x-user-picture": user.picture } : {}),
-        },
+        headers: userHeaders(user),
         body: JSON.stringify({
-          name: name.trim(),
-          url: url.trim(),
+          name: name.trim() || preview?.name || undefined,
+          url: preview?.url || url.trim(),
+          image: preview?.image || undefined,
+          platform: preview?.platform || undefined,
+          currency: preview?.currency || "USD",
+          initialPrice: preview?.price ?? undefined,
           targetPrice: parsedTargetPrice,
-          currency: "USD",
         }),
       });
 
@@ -131,6 +256,9 @@ export default function TrackedItemsManager({ user }: { user: UserContext }) {
       setName("");
       setUrl("");
       setTargetPrice("");
+      setPreview(null);
+      setExtractState("idle");
+      setExtractMessage(null);
     } catch (submitError) {
       setError(
         submitError instanceof Error
@@ -148,13 +276,7 @@ export default function TrackedItemsManager({ user }: { user: UserContext }) {
     try {
       const response = await fetch(`${API_BASE_URL}/api/tracked-items/${id}`, {
         method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-          "x-user-sub": user.sub,
-          ...(user.name ? { "x-user-name": user.name } : {}),
-          ...(user.email ? { "x-user-email": user.email } : {}),
-          ...(user.picture ? { "x-user-picture": user.picture } : {}),
-        },
+        headers: userHeaders(user),
       });
 
       if (!response.ok) {
@@ -175,6 +297,8 @@ export default function TrackedItemsManager({ user }: { user: UserContext }) {
       );
     }
   }
+
+  const previewPlatform = platformLabel(preview?.platform ?? null);
 
   return (
     <div className="space-y-8">
@@ -204,6 +328,62 @@ export default function TrackedItemsManager({ user }: { user: UserContext }) {
               className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
             />
           </div>
+
+          {extractState === "loading" ? (
+            <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600">
+              <span className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin flex-shrink-0"></span>
+              Reading product page...
+            </div>
+          ) : extractState === "success" && preview ? (
+            <div className="flex items-start gap-4 rounded-xl border border-indigo-100 bg-indigo-50/50 px-4 py-3">
+              {preview.image ? (
+                <Image
+                  src={preview.image}
+                  alt={preview.name ?? "Product"}
+                  width={64}
+                  height={64}
+                  unoptimized
+                  className="w-16 h-16 rounded-lg object-cover bg-white border border-gray-200 flex-shrink-0"
+                />
+              ) : (
+                <div className="w-16 h-16 rounded-lg bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center flex-shrink-0">
+                  <svg
+                    className="w-7 h-7 text-gray-400"
+                    fill="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path d="M21 4H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H3V6h18v12zM8.5 12l-2 3h11l-3.5-4.5-2.5 3.5-2-2z" />
+                  </svg>
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-0.5">
+                  {previewPlatform ? (
+                    <span className="rounded-full bg-indigo-50 border border-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-600 uppercase tracking-wide">
+                      {previewPlatform}
+                    </span>
+                  ) : null}
+                  <span className="text-[11px] font-medium text-emerald-600 uppercase tracking-wide">
+                    Auto-detected
+                  </span>
+                </div>
+                <p className="text-sm font-semibold text-gray-900 truncate">
+                  {preview.name || "Product name not detected"}
+                </p>
+                <p className="text-xs text-gray-500 truncate">
+                  {preview.url}
+                </p>
+                <p className="text-sm font-bold text-indigo-700 mt-1">
+                  {formatPrice(preview.price, preview.currency)}
+                </p>
+              </div>
+            </div>
+          ) : extractState === "error" ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+              {extractMessage}
+            </div>
+          ) : null}
+
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
               <label
@@ -295,19 +475,37 @@ export default function TrackedItemsManager({ user }: { user: UserContext }) {
                 key={item.id}
                 className="group bg-white border border-gray-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow flex items-center gap-4"
               >
-                <div className="w-12 h-12 flex-shrink-0 rounded-xl bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
-                  <svg
-                    className="w-6 h-6 text-gray-400"
-                    fill="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-                  </svg>
-                </div>
+                {item.image ? (
+                  <Image
+                    src={item.image}
+                    alt={item.name}
+                    width={48}
+                    height={48}
+                    unoptimized
+                    className="w-12 h-12 rounded-xl object-cover bg-gray-50 border border-gray-200 flex-shrink-0"
+                  />
+                ) : (
+                  <div className="w-12 h-12 flex-shrink-0 rounded-xl bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
+                    <svg
+                      className="w-6 h-6 text-gray-400"
+                      fill="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                    </svg>
+                  </div>
+                )}
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-sm font-bold text-gray-900 truncate">
-                    {item.name}
-                  </h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold text-gray-900 truncate">
+                      {item.name}
+                    </h3>
+                    {platformLabel(item.platform) ? (
+                      <span className="flex-shrink-0 rounded-full bg-indigo-50 border border-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-600 uppercase tracking-wide">
+                        {platformLabel(item.platform)}
+                      </span>
+                    ) : null}
+                  </div>
                   <a
                     href={item.url}
                     target="_blank"
@@ -318,12 +516,22 @@ export default function TrackedItemsManager({ user }: { user: UserContext }) {
                   </a>
                 </div>
                 <div className="text-right flex-shrink-0">
+                  {item.lastPrice != null ? (
+                    <>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide">
+                        Current Price
+                      </p>
+                      <p className="text-sm font-bold text-gray-900">
+                        {formatPrice(item.lastPrice, item.currency)}
+                      </p>
+                    </>
+                  ) : null}
                   <p className="text-xs text-gray-500 uppercase tracking-wide">
                     Target Price
                   </p>
-                  {item.targetPrice ? (
+                  {item.targetPrice != null ? (
                     <p className="text-sm font-bold text-gray-900">
-                      ${item.targetPrice.toFixed(2)}
+                      {formatPrice(item.targetPrice, item.currency)}
                     </p>
                   ) : (
                     <p className="text-sm font-semibold text-gray-400">

@@ -2,7 +2,7 @@ const cron = require("node-cron");
 const TrackedItem = require("../models/TrackedItem");
 const PriceCheck = require("../models/PriceCheck");
 const Alert = require("../models/Alert");
-const { runPriceCheck } = require("./priceChecker");
+const { runPriceCheck } = require("./productScraper");
 const { alertNotifier } = require("./alertNotifier");
 const {
   CHECK_INTERVAL_MS,
