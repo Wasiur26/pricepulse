@@ -2,6 +2,8 @@
 
 import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
+import PriceHistoryChart from "@/components/PriceHistoryChart";
+import { formatPrice } from "@/lib/format";
 
 type TrackedItem = {
   id: string;
@@ -63,24 +65,6 @@ const PLATFORM_LABELS: Record<string, string> = {
   zappos: "Zappos",
 };
 
-function formatPrice(price: number | null, currency: string | null): string {
-  if (price == null) return "—";
-  const code = (currency || "USD").toUpperCase();
-  const symbols: Record<string, string> = {
-    USD: "$",
-    EUR: "€",
-    GBP: "£",
-    JPY: "¥",
-    INR: "₹",
-    CAD: "C$",
-    AUD: "A$",
-    KRW: "₩",
-  };
-  const symbol = symbols[code];
-  if (symbol) return `${symbol}${price.toFixed(2)}`;
-  return `${price.toFixed(2)} ${code}`;
-}
-
 function platformLabel(platform: string | null): string | null {
   if (!platform) return null;
   return PLATFORM_LABELS[platform] || platform;
@@ -110,6 +94,7 @@ export default function TrackedItemsManager({ user }: { user: UserContext }) {
     "idle" | "loading" | "success" | "error"
   >("idle");
   const [extractMessage, setExtractMessage] = useState<string | null>(null);
+  const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
 
   const loadItems = useCallback(async () => {
     try {
@@ -470,97 +455,137 @@ export default function TrackedItemsManager({ user }: { user: UserContext }) {
           </div>
         ) : (
           <ul className="space-y-3">
-            {items.map((item) => (
-              <li
-                key={item.id}
-                className="group bg-white border border-gray-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow flex items-center gap-4"
-              >
-                {item.image ? (
-                  <Image
-                    src={item.image}
-                    alt={item.name}
-                    width={48}
-                    height={48}
-                    unoptimized
-                    className="w-12 h-12 rounded-xl object-cover bg-gray-50 border border-gray-200 flex-shrink-0"
-                  />
-                ) : (
-                  <div className="w-12 h-12 flex-shrink-0 rounded-xl bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
-                    <svg
-                      className="w-6 h-6 text-gray-400"
-                      fill="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-                    </svg>
-                  </div>
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-bold text-gray-900 truncate">
-                      {item.name}
-                    </h3>
-                    {platformLabel(item.platform) ? (
-                      <span className="flex-shrink-0 rounded-full bg-indigo-50 border border-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-600 uppercase tracking-wide">
-                        {platformLabel(item.platform)}
-                      </span>
-                    ) : null}
-                  </div>
-                  <a
-                    href={item.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-indigo-600 hover:text-indigo-800 hover:underline truncate block"
-                  >
-                    {item.url}
-                  </a>
-                </div>
-                <div className="text-right flex-shrink-0">
-                  {item.lastPrice != null ? (
-                    <>
-                      <p className="text-xs text-gray-500 uppercase tracking-wide">
-                        Current Price
-                      </p>
-                      <p className="text-sm font-bold text-gray-900">
-                        {formatPrice(item.lastPrice, item.currency)}
-                      </p>
-                    </>
-                  ) : null}
-                  <p className="text-xs text-gray-500 uppercase tracking-wide">
-                    Target Price
-                  </p>
-                  {item.targetPrice != null ? (
-                    <p className="text-sm font-bold text-gray-900">
-                      {formatPrice(item.targetPrice, item.currency)}
-                    </p>
-                  ) : (
-                    <p className="text-sm font-semibold text-gray-400">
-                      Any drop
-                    </p>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => removeItem(item.id)}
-                  aria-label={`Remove ${item.name}`}
-                  className="flex-shrink-0 p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+            {items.map((item) => {
+              const isExpanded = expandedItemId === item.id;
+              return (
+                <li
+                  key={item.id}
+                  className="group bg-white border border-gray-200 rounded-2xl shadow-sm hover:shadow-md transition-shadow overflow-hidden"
                 >
-                  <svg
-                    className="w-5 h-5"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
-                </button>
-              </li>
-            ))}
+                  <div className="flex items-center gap-4 p-5">
+                    {item.image ? (
+                      <Image
+                        src={item.image}
+                        alt={item.name}
+                        width={48}
+                        height={48}
+                        unoptimized
+                        className="w-12 h-12 rounded-xl object-cover bg-gray-50 border border-gray-200 flex-shrink-0"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 flex-shrink-0 rounded-xl bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
+                        <svg
+                          className="w-6 h-6 text-gray-400"
+                          fill="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                        </svg>
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-bold text-gray-900 truncate">
+                          {item.name}
+                        </h3>
+                        {platformLabel(item.platform) ? (
+                          <span className="flex-shrink-0 rounded-full bg-indigo-50 border border-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-600 uppercase tracking-wide">
+                            {platformLabel(item.platform)}
+                          </span>
+                        ) : null}
+                      </div>
+                      <a
+                        href={item.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-indigo-600 hover:text-indigo-800 hover:underline truncate block"
+                      >
+                        {item.url}
+                      </a>
+                    </div>
+                    <div className="text-right flex-shrink-0 hidden sm:block">
+                      {item.lastPrice != null ? (
+                        <>
+                          <p className="text-xs text-gray-500 uppercase tracking-wide">
+                            Current Price
+                          </p>
+                          <p className="text-sm font-bold text-gray-900">
+                            {formatPrice(item.lastPrice, item.currency)}
+                          </p>
+                        </>
+                      ) : null}
+                      <p className="text-xs text-gray-500 uppercase tracking-wide">
+                        Target Price
+                      </p>
+                      {item.targetPrice != null ? (
+                        <p className="text-sm font-bold text-gray-900">
+                          {formatPrice(item.targetPrice, item.currency)}
+                        </p>
+                      ) : (
+                        <p className="text-sm font-semibold text-gray-400">
+                          Any drop
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedItemId(isExpanded ? null : item.id)
+                        }
+                        aria-expanded={isExpanded}
+                        aria-label={`Toggle price history for ${item.name}`}
+                        title="Price history"
+                        className={`p-2 rounded-lg transition-colors ${
+                          isExpanded
+                            ? "text-indigo-600 bg-indigo-50"
+                            : "text-gray-400 hover:text-indigo-600 hover:bg-indigo-50"
+                        }`}
+                      >
+                        <svg
+                          className="w-5 h-5"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M3 3v18h18M7 15l4-4 3 3 5-6"
+                          />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeItem(item.id)}
+                        aria-label={`Remove ${item.name}`}
+                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      >
+                        <svg
+                          className="w-5 h-5"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M6 18L18 6M6 6l12 12"
+                          />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                  {isExpanded ? (
+                    <div className="border-t border-gray-100 bg-gray-50/60 px-4 pb-5 pt-4 sm:px-5">
+                      <PriceHistoryChart item={item} user={user} />
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

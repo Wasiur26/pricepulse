@@ -8,6 +8,8 @@
     "dev": "node index.js",
     "start": "node index.js",
     "test": "node scheduler/runTests.js",
+    "seed": "node db/seedHistory.js",
+    "seed:history": "node db/seedHistory.js",
     "scheduler:run-once": "node scheduler/runOnce.js",
     "scheduler:seed-demo": "node scheduler/seedDemo.js"
   },
