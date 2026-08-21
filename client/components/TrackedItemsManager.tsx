@@ -1,25 +1,12 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import PriceHistoryChart from "@/components/PriceHistoryChart";
+import { API_BASE_URL, userHeaders } from "@/lib/api";
 import { formatPrice } from "@/lib/format";
-
-type TrackedItem = {
-  id: string;
-  name: string;
-  url: string;
-  image: string | null;
-  platform: string | null;
-  targetPrice: number | null;
-  currency: string;
-  active: boolean;
-  lastPrice: number | null;
-  lastStatus: "pending" | "success" | "error" | "skipped";
-  lastCheckedAt: string | null;
-  nextCheckAt: string;
-  createdAt: string;
-};
+import { platformLabel } from "@/lib/platforms";
+import type { TrackedItem, UserContext } from "@/lib/types";
 
 type ExtractMetadata = {
   url: string;
@@ -30,55 +17,6 @@ type ExtractMetadata = {
   currency: string | null;
   priceStrategy: string | null;
 };
-
-type UserContext = {
-  sub: string;
-  name?: string;
-  email?: string;
-  picture?: string;
-};
-
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
-
-const PLATFORM_LABELS: Record<string, string> = {
-  amazon: "Amazon",
-  ebay: "eBay",
-  walmart: "Walmart",
-  bestbuy: "Best Buy",
-  target: "Target",
-  etsy: "Etsy",
-  newegg: "Newegg",
-  aliexpress: "AliExpress",
-  alibaba: "Alibaba",
-  shopify: "Shopify",
-  homedepot: "Home Depot",
-  lowes: "Lowe's",
-  costco: "Costco",
-  ikea: "IKEA",
-  nike: "Nike",
-  adidas: "Adidas",
-  apple: "Apple",
-  harborfreight: "Harbor Freight",
-  overstock: "Overstock",
-  wayfair: "Wayfair",
-  zappos: "Zappos",
-};
-
-function platformLabel(platform: string | null): string | null {
-  if (!platform) return null;
-  return PLATFORM_LABELS[platform] || platform;
-}
-
-function userHeaders(user: UserContext): Record<string, string> {
-  return {
-    "Content-Type": "application/json",
-    "x-user-sub": user.sub,
-    ...(user.name ? { "x-user-name": user.name } : {}),
-    ...(user.email ? { "x-user-email": user.email } : {}),
-    ...(user.picture ? { "x-user-picture": user.picture } : {}),
-  };
-}
 
 export default function TrackedItemsManager({ user }: { user: UserContext }) {
   const [items, setItems] = useState<TrackedItem[]>([]);
@@ -94,7 +32,6 @@ export default function TrackedItemsManager({ user }: { user: UserContext }) {
     "idle" | "loading" | "success" | "error"
   >("idle");
   const [extractMessage, setExtractMessage] = useState<string | null>(null);
-  const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
 
   const loadItems = useCallback(async () => {
     try {
@@ -314,61 +251,6 @@ export default function TrackedItemsManager({ user }: { user: UserContext }) {
             />
           </div>
 
-          {extractState === "loading" ? (
-            <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600">
-              <span className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin flex-shrink-0"></span>
-              Reading product page...
-            </div>
-          ) : extractState === "success" && preview ? (
-            <div className="flex items-start gap-4 rounded-xl border border-indigo-100 bg-indigo-50/50 px-4 py-3">
-              {preview.image ? (
-                <Image
-                  src={preview.image}
-                  alt={preview.name ?? "Product"}
-                  width={64}
-                  height={64}
-                  unoptimized
-                  className="w-16 h-16 rounded-lg object-cover bg-white border border-gray-200 flex-shrink-0"
-                />
-              ) : (
-                <div className="w-16 h-16 rounded-lg bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center flex-shrink-0">
-                  <svg
-                    className="w-7 h-7 text-gray-400"
-                    fill="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path d="M21 4H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H3V6h18v12zM8.5 12l-2 3h11l-3.5-4.5-2.5 3.5-2-2z" />
-                  </svg>
-                </div>
-              )}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-0.5">
-                  {previewPlatform ? (
-                    <span className="rounded-full bg-indigo-50 border border-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-600 uppercase tracking-wide">
-                      {previewPlatform}
-                    </span>
-                  ) : null}
-                  <span className="text-[11px] font-medium text-emerald-600 uppercase tracking-wide">
-                    Auto-detected
-                  </span>
-                </div>
-                <p className="text-sm font-semibold text-gray-900 truncate">
-                  {preview.name || "Product name not detected"}
-                </p>
-                <p className="text-xs text-gray-500 truncate">
-                  {preview.url}
-                </p>
-                <p className="text-sm font-bold text-indigo-700 mt-1">
-                  {formatPrice(preview.price, preview.currency)}
-                </p>
-              </div>
-            </div>
-          ) : extractState === "error" ? (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-              {extractMessage}
-            </div>
-          ) : null}
-
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
               <label
@@ -415,6 +297,79 @@ export default function TrackedItemsManager({ user }: { user: UserContext }) {
         </form>
       </div>
 
+      {extractState === "loading" ? (
+        <div className="bg-white border border-gray-200 rounded-2xl p-8 shadow-sm">
+          <h3 className="text-base font-bold text-gray-900 mb-4">
+            Product Preview
+          </h3>
+          <div className="flex items-center gap-4 text-sm text-gray-600">
+            <span className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin flex-shrink-0"></span>
+            Reading product page...
+          </div>
+        </div>
+      ) : extractState === "success" && preview ? (
+        <div className="bg-white border border-indigo-200 ring-1 ring-indigo-100 rounded-2xl p-8 shadow-sm">
+          <div className="flex items-center justify-between mb-5">
+            <h3 className="text-base font-bold text-gray-900">
+              Product Preview
+            </h3>
+            <span className="rounded-full bg-emerald-50 border border-emerald-100 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-600 uppercase tracking-wide">
+              Auto-detected
+            </span>
+          </div>
+          <div className="flex flex-col sm:flex-row items-start gap-6">
+            {preview.image ? (
+              <Image
+                src={preview.image}
+                alt={preview.name ?? "Product"}
+                width={112}
+                height={112}
+                unoptimized
+                className="w-28 h-28 rounded-xl object-cover bg-white border border-gray-200 flex-shrink-0"
+              />
+            ) : (
+              <div className="w-28 h-28 rounded-xl bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center flex-shrink-0">
+                <svg
+                  className="w-12 h-12 text-gray-400"
+                  fill="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path d="M21 4H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H3V6h18v12zM8.5 12l-2 3h11l-3.5-4.5-2.5 3.5-2-2z" />
+                </svg>
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              {previewPlatform ? (
+                <span className="inline-block rounded-full bg-indigo-50 border border-indigo-100 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-600 uppercase tracking-wide mb-2">
+                  {previewPlatform}
+                </span>
+              ) : null}
+              <p className="text-lg font-bold text-gray-900 leading-snug break-words">
+                {preview.name || "Product name not detected"}
+              </p>
+              <a
+                href={preview.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-indigo-600 hover:text-indigo-800 hover:underline break-all"
+              >
+                {preview.url}
+              </a>
+              <p className="text-2xl font-bold text-indigo-700 mt-3">
+                {formatPrice(preview.price, preview.currency)}
+              </p>
+            </div>
+          </div>
+          <p className="mt-5 pt-4 border-t border-gray-100 text-xs text-gray-500">
+            Looks right? Click &quot;Start Tracking&quot; above to save it.
+          </p>
+        </div>
+      ) : extractState === "error" ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-6 py-4 text-sm text-amber-700">
+          {extractMessage}
+        </div>
+      ) : null}
+
       {error ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
@@ -456,7 +411,6 @@ export default function TrackedItemsManager({ user }: { user: UserContext }) {
         ) : (
           <ul className="space-y-3">
             {items.map((item) => {
-              const isExpanded = expandedItemId === item.id;
               return (
                 <li
                   key={item.id}
@@ -485,9 +439,12 @@ export default function TrackedItemsManager({ user }: { user: UserContext }) {
                     )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <h3 className="text-sm font-bold text-gray-900 truncate">
+                        <Link
+                          href={`/tracked-items/${item.id}`}
+                          className="text-sm font-bold text-gray-900 truncate hover:text-indigo-600 transition-colors"
+                        >
                           {item.name}
-                        </h3>
+                        </Link>
                         {platformLabel(item.platform) ? (
                           <span className="flex-shrink-0 rounded-full bg-indigo-50 border border-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-600 uppercase tracking-wide">
                             {platformLabel(item.platform)}
@@ -528,19 +485,11 @@ export default function TrackedItemsManager({ user }: { user: UserContext }) {
                       )}
                     </div>
                     <div className="flex items-center gap-1 flex-shrink-0">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setExpandedItemId(isExpanded ? null : item.id)
-                        }
-                        aria-expanded={isExpanded}
-                        aria-label={`Toggle price history for ${item.name}`}
-                        title="Price history"
-                        className={`p-2 rounded-lg transition-colors ${
-                          isExpanded
-                            ? "text-indigo-600 bg-indigo-50"
-                            : "text-gray-400 hover:text-indigo-600 hover:bg-indigo-50"
-                        }`}
+                      <Link
+                        href={`/tracked-items/${item.id}`}
+                        aria-label={`View details and price history for ${item.name}`}
+                        title="View details & price history"
+                        className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
                       >
                         <svg
                           className="w-5 h-5"
@@ -552,10 +501,10 @@ export default function TrackedItemsManager({ user }: { user: UserContext }) {
                           <path
                             strokeLinecap="round"
                             strokeLinejoin="round"
-                            d="M3 3v18h18M7 15l4-4 3 3 5-6"
+                            d="M9 5l7 7-7 7"
                           />
                         </svg>
-                      </button>
+                      </Link>
                       <button
                         type="button"
                         onClick={() => removeItem(item.id)}
@@ -578,11 +527,6 @@ export default function TrackedItemsManager({ user }: { user: UserContext }) {
                       </button>
                     </div>
                   </div>
-                  {isExpanded ? (
-                    <div className="border-t border-gray-100 bg-gray-50/60 px-4 pb-5 pt-4 sm:px-5">
-                      <PriceHistoryChart item={item} user={user} />
-                    </div>
-                  ) : null}
                 </li>
               );
             })}

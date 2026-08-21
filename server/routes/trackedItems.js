@@ -97,6 +97,37 @@ router.post("/", async (req, res) => {
   }
 });
 
+router.get("/:id", async (req, res) => {
+  try {
+    const itemId = req.params.id;
+    if (!mongoose.Types.ObjectId.isValid(itemId)) {
+      return res.status(400).json({
+        error: "ValidationError",
+        message: "Invalid tracked item id.",
+      });
+    }
+
+    const item = await TrackedItem.findOne({
+      _id: itemId,
+      user: req.user._id,
+    }).lean();
+
+    if (!item) {
+      return res.status(404).json({
+        error: "NotFound",
+        message: "Tracked item not found.",
+      });
+    }
+
+    return res.json({ item: toTrackedItemDto(item) });
+  } catch (error) {
+    return res.status(500).json({
+      error: "ServerError",
+      message: "Failed to fetch tracked item.",
+    });
+  }
+});
+
 /**
  * POST /extract
  * Clean a pasted product link, identify the platform, and return the initial

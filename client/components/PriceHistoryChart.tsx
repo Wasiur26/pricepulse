@@ -1,14 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { API_BASE_URL, userHeaders } from "@/lib/api";
+import type { UserContext } from "@/lib/types";
 import { formatPrice } from "@/lib/format";
-
-type UserContext = {
-  sub: string;
-  name?: string;
-  email?: string;
-  picture?: string;
-};
 
 export type HistoryChartItem = {
   id: string;
@@ -47,9 +42,6 @@ type ChartResponse = {
   points: ChartPoint[];
 };
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
-
 const TIME_RANGES = [
   { label: "24H", value: "24h" },
   { label: "7D", value: "7d" },
@@ -82,16 +74,6 @@ const MONTHS = [
 
 const CHART_HEIGHT = 300;
 const PAD = { top: 20, right: 64, bottom: 30, left: 14 };
-
-function userHeaders(user: UserContext): Record<string, string> {
-  return {
-    "Content-Type": "application/json",
-    "x-user-sub": user.sub,
-    ...(user.name ? { "x-user-name": user.name } : {}),
-    ...(user.email ? { "x-user-email": user.email } : {}),
-    ...(user.picture ? { "x-user-picture": user.picture } : {}),
-  };
-}
 
 function pad2(value: number): string {
   return String(value).padStart(2, "0");
@@ -129,11 +111,15 @@ function niceTicks(min: number, max: number, count = 4): number[] {
 }
 
 function useContainerWidth() {
-  const ref = useRef<HTMLDivElement | null>(null);
+  const observerRef = useRef<ResizeObserver | null>(null);
   const [width, setWidth] = useState(0);
 
-  useEffect(() => {
-    const element = ref.current;
+  const ref = useCallback((element: HTMLDivElement | null) => {
+    if (observerRef.current) {
+      observerRef.current.disconnect();
+      observerRef.current = null;
+    }
+
     if (!element) return;
 
     const observer = new ResizeObserver((entries) => {
@@ -143,9 +129,8 @@ function useContainerWidth() {
     });
 
     observer.observe(element);
+    observerRef.current = observer;
     setWidth(element.getBoundingClientRect().width);
-
-    return () => observer.disconnect();
   }, []);
 
   return { ref, width };
