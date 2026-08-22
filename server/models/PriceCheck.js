@@ -46,5 +46,7 @@ const priceCheckSchema = new mongoose.Schema(
 );
 
 priceCheckSchema.index({ trackedItem: 1, checkedAt: -1 });
+priceCheckSchema.index({ trackedItem: 1, status: 1, checkedAt: -1 });
+priceCheckSchema.index({ trackedItem: 1, checkedAt: 1 });
 
 module.exports = mongoose.model("PriceCheck", priceCheckSchema);

@@ -339,6 +339,195 @@ function testNameAndImageExtraction() {
   console.log("✓ Name/image extraction test passed.");
 }
 
+const {
+  parseTimeframe,
+  calculatePriceStatistics,
+  bucketPriceChecks,
+  formatPriceHistoryCsv,
+  toPriceCheckDto,
+  toTrackedItemDto,
+} = require("../services/priceHistoryService");
+
+function testTimeframeParsing() {
+  console.log("\n[Test 15] Testing price history timeframe parsing...");
+
+  const tf24h = parseTimeframe("24h");
+  assert.strictEqual(tf24h.timeframe, "24h");
+  assert.ok(tf24h.startDate instanceof Date);
+  assert.ok(Date.now() - tf24h.startDate.getTime() >= 23 * 60 * 60 * 1000);
+
+  const tf7d = parseTimeframe("7d");
+  assert.strictEqual(tf7d.timeframe, "7d");
+  assert.ok(Date.now() - tf7d.startDate.getTime() >= 6 * 24 * 60 * 60 * 1000);
+
+  const tf30d = parseTimeframe("30d");
+  assert.strictEqual(tf30d.timeframe, "30d");
+
+  const tfAll = parseTimeframe("all");
+  assert.strictEqual(tfAll.timeframe, "all");
+  assert.strictEqual(tfAll.startDate, null);
+
+  const custom = parseTimeframe("custom", "2026-01-01T00:00:00.000Z", "2026-06-01T00:00:00.000Z");
+  assert.strictEqual(custom.timeframe, "custom");
+  assert.strictEqual(custom.startDate.toISOString(), "2026-01-01T00:00:00.000Z");
+  assert.strictEqual(custom.endDate.toISOString(), "2026-06-01T00:00:00.000Z");
+
+  console.log("✓ Price history timeframe parsing test passed.");
+}
+
+function testPriceStatisticsCalculation() {
+  console.log("\n[Test 16] Testing price history statistics calculation...");
+
+  const mockChecks = [
+    { status: "success", price: 180.0, checkedAt: new Date("2026-03-01T12:00:00Z"), currency: "USD" },
+    { status: "success", price: 150.0, checkedAt: new Date("2026-02-15T12:00:00Z"), currency: "USD" },
+    { status: "success", price: 220.0, checkedAt: new Date("2026-02-01T12:00:00Z"), currency: "USD" },
+    { status: "success", price: 200.0, checkedAt: new Date("2026-01-01T12:00:00Z"), currency: "USD" },
+  ];
+
+  const stats = calculatePriceStatistics(mockChecks, mockChecks, 180.0, 160.0);
+
+  assert.strictEqual(stats.currentPrice, 180.0);
+  assert.strictEqual(stats.allTimeHigh.price, 220.0);
+  assert.strictEqual(stats.allTimeLow.price, 150.0);
+  assert.strictEqual(stats.allTimeAverage, 187.5);
+  assert.strictEqual(stats.initialPrice, 200.0);
+  assert.strictEqual(stats.allTimeChange.amount, -20.0);
+  assert.strictEqual(stats.allTimeChange.percentage, -10.0);
+  assert.strictEqual(stats.targetPriceDistance.targetPrice, 160.0);
+  assert.strictEqual(stats.targetPriceDistance.amountNeeded, 20.0);
+  assert.strictEqual(stats.targetPriceDistance.isTargetReached, false);
+
+  // Target reached case
+  const statsTargetReached = calculatePriceStatistics(mockChecks, mockChecks, 150.0, 160.0);
+  assert.strictEqual(statsTargetReached.targetPriceDistance.isTargetReached, true);
+  assert.strictEqual(statsTargetReached.targetPriceDistance.amountNeeded, 0);
+
+  console.log("✓ Price history statistics calculation test passed.");
+}
+
+function testTimeBucketingAndDownsampling() {
+  console.log("\n[Test 17] Testing time-series bucketing and downsampling...");
+
+  const checks = [
+    { status: "success", price: 100, checkedAt: new Date("2026-03-01T08:00:00Z") },
+    { status: "success", price: 110, checkedAt: new Date("2026-03-01T14:00:00Z") },
+    { status: "success", price: 90, checkedAt: new Date("2026-03-01T20:00:00Z") },
+    { status: "success", price: 120, checkedAt: new Date("2026-03-02T10:00:00Z") },
+  ];
+
+  const daily = bucketPriceChecks(checks, "daily");
+  assert.strictEqual(daily.length, 2, "Should aggregate into 2 daily buckets");
+  assert.strictEqual(daily[0].open, 100);
+  assert.strictEqual(daily[0].high, 110);
+  assert.strictEqual(daily[0].low, 90);
+  assert.strictEqual(daily[0].close, 90);
+  assert.strictEqual(daily[0].price, 100);
+  assert.strictEqual(daily[0].count, 3);
+
+  assert.strictEqual(daily[1].open, 120);
+  assert.strictEqual(daily[1].high, 120);
+  assert.strictEqual(daily[1].low, 120);
+  assert.strictEqual(daily[1].close, 120);
+  assert.strictEqual(daily[1].price, 120);
+  assert.strictEqual(daily[1].count, 1);
+
+  const raw = bucketPriceChecks(checks, "raw");
+  assert.strictEqual(raw.length, 4, "Raw bucketing should return all points");
+
+  console.log("✓ Time-series bucketing and downsampling test passed.");
+}
+
+function testCsvExportFormatting() {
+  console.log("\n[Test 18] Testing price history CSV export formatting...");
+
+  const mockItem = {
+    name: 'Sony WH-1000XM5 "Special Edition"',
+    url: "https://www.example.com/item,with,comma",
+    currency: "USD",
+  };
+
+  const mockChecks = [
+    {
+      _id: "check_1",
+      checkedAt: new Date("2026-03-01T12:00:00Z"),
+      status: "success",
+      price: 348.0,
+      currency: "USD",
+      responseMs: 145,
+      errorMessage: null,
+    },
+    {
+      _id: "check_2",
+      checkedAt: new Date("2026-03-02T12:00:00Z"),
+      status: "error",
+      price: null,
+      currency: "USD",
+      responseMs: 500,
+      errorMessage: "HTTP 503, Service Unavailable",
+    },
+  ];
+
+  const csv = formatPriceHistoryCsv(mockItem, mockChecks);
+  assert.ok(csv.includes("Check ID,Checked At (UTC),Status,Price,Currency,Response Time (ms),Error Message"));
+  assert.ok(csv.includes('"Sony WH-1000XM5 ""Special Edition"""'));
+  assert.ok(csv.includes("check_1,2026-03-01T12:00:00.000Z,success,348.00,USD,145,"));
+  assert.ok(csv.includes('check_2,2026-03-02T12:00:00.000Z,error,,USD,500,"HTTP 503, Service Unavailable"'));
+
+  console.log("✓ Price history CSV export formatting test passed.");
+}
+
+function testPriceHistoryDtoMapping() {
+  console.log("\n[Test 19] Testing PriceCheck and TrackedItem DTO mapping...");
+
+  const rawCheck = {
+    _id: "660000000000000000000001",
+    trackedItem: "660000000000000000000002",
+    checkedAt: new Date("2026-03-01T12:00:00Z"),
+    status: "success",
+    price: 99.99,
+    currency: "USD",
+    responseMs: 120,
+    errorMessage: null,
+    createdAt: new Date("2026-03-01T12:00:00Z"),
+  };
+
+  const dto = toPriceCheckDto(rawCheck);
+  assert.strictEqual(dto.id, "660000000000000000000001");
+  assert.strictEqual(dto.trackedItemId, "660000000000000000000002");
+  assert.strictEqual(dto.price, 99.99);
+  assert.strictEqual(dto.status, "success");
+
+  console.log("✓ PriceCheck and TrackedItem DTO mapping test passed.");
+}
+
+const { generateHistoricalPriceChecks, SEED_PRODUCTS } = require("../db/seedHistory");
+
+function testSeedHistoryGeneration() {
+  console.log("\n[Test 20] Testing database seed history generator...");
+
+  const product = SEED_PRODUCTS[0]; // Sony headphones
+  const now = new Date("2026-03-01T12:00:00Z");
+  const checks = generateHistoricalPriceChecks(product, now);
+
+  assert.strictEqual(checks.length, product.daysOfHistory * product.checksPerDay);
+
+  const lastCheck = checks[checks.length - 1];
+  assert.strictEqual(lastCheck.price, product.currentPrice);
+  assert.strictEqual(lastCheck.currency, product.currency);
+  assert.strictEqual(lastCheck.status, "success");
+
+  // Verify timestamps are in ascending order
+  for (let i = 1; i < checks.length; i++) {
+    assert.ok(
+      checks[i].checkedAt.getTime() > checks[i - 1].checkedAt.getTime(),
+      "Seed check timestamps must be strictly chronological",
+    );
+  }
+
+  console.log("✓ Database seed history generator test passed.");
+}
+
 function runAllTests() {
   try {
     testPriceParsing();
@@ -355,8 +544,14 @@ function runAllTests() {
     testDetectPlatform();
     testMetadataExtraction();
     testNameAndImageExtraction();
+    testTimeframeParsing();
+    testPriceStatisticsCalculation();
+    testTimeBucketingAndDownsampling();
+    testCsvExportFormatting();
+    testPriceHistoryDtoMapping();
+    testSeedHistoryGeneration();
     console.log("\n=================================================");
-    console.log("ALL SCHEDULER & PRICE-CHECK TESTS PASSED (14/14)");
+    console.log("ALL SCHEDULER & PRICE HISTORY TESTS PASSED (20/20)");
     console.log("=================================================\n");
   } catch (error) {
     console.error("\n❌ TEST FAILED:", error);

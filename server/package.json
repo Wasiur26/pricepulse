@@ -5,9 +5,11 @@
   "type": "commonjs",
   "main": "index.js",
   "scripts": {
-    "dev": "node index.js",
+    "dev": "nodemon index.js",
     "start": "node index.js",
     "test": "node scheduler/runTests.js",
+    "seed": "node db/seedHistory.js",
+    "seed:history": "node db/seedHistory.js",
     "scheduler:run-once": "node scheduler/runOnce.js",
     "scheduler:seed-demo": "node scheduler/seedDemo.js"
   },
@@ -17,5 +19,8 @@
     "express": "^5.2.1",
     "mongoose": "^9.9.2",
     "node-cron": "^4.6.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
   }
 }

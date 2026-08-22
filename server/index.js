@@ -7,6 +7,7 @@ const { connectToMongo } = require("./db/mongoose");
 const { startPriceScheduler } = require("./scheduler/priceScheduler");
 const { requireUser } = require("./middleware/requireUser");
 const { trackedItemsRouter } = require("./routes/trackedItems");
+const { priceHistoryRouter } = require("./routes/priceHistory");
 const { schedulerRouter } = require("./routes/scheduler");
 
 const app = express();
@@ -44,6 +45,7 @@ app.get("/health", (req, res) => {
 });
 
 app.use("/api/tracked-items", requireUser, trackedItemsRouter);
+app.use("/api/price-history", requireUser, priceHistoryRouter);
 app.use("/api/scheduler", schedulerRouter);
 
 async function bootstrap() {

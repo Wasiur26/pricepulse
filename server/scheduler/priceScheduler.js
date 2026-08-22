@@ -122,6 +122,9 @@ async function createAlertIfNeeded(item, result) {
     return;
   }
 
+  // `item.user` may be a populated doc or a raw ObjectId (lean queries)
+  const userId = item.user && item.user._id ? item.user._id : item.user;
+
   const previousPrice = item.lastPrice;
   const currentPrice = result.price;
   const targetPrice = item.targetPrice;
@@ -130,7 +133,7 @@ async function createAlertIfNeeded(item, result) {
   if (targetPrice != null && currentPrice <= targetPrice) {
     const alert = await Alert.create({
       trackedItem: item._id,
-      user: item.user._id,
+      user: userId,
       type: "target_price_reached",
       payload: {
         name: item.name,
@@ -151,7 +154,7 @@ async function createAlertIfNeeded(item, result) {
   if (previousPrice != null && currentPrice < previousPrice) {
     const alert = await Alert.create({
       trackedItem: item._id,
-      user: item.user._id,
+      user: userId,
       type: "price_dropped",
       payload: {
         name: item.name,
